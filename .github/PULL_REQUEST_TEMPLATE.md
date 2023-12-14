@@ -1,7 +1,7 @@
 ## Overview
 -
 
-## Chagne Log
+## Change Log
 -
 
 ## To Reviewer
