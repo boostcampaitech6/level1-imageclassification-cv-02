@@ -1,13 +1,13 @@
 import redis, json, time, os
 
 if __name__ == "__main__":
-    redis_server = redis.Redis(host='10.28.224.190', port=30062, db=0)
+    redis_server = redis.Redis(host='10.28.224.12', port=30002, db=0)
 
     config = {
         "mode" :  "train", # train or eval
         "experiment_name" : "hyun_test_experiment",
         "seed" : 42,
-        "epochs" : 10,
+        "epochs" : 1,
         "dataset" : "MaskBaseDataset",
         "augmentation" : "BaseAugmentation",
         "resize" : [128, 96],
@@ -21,7 +21,7 @@ if __name__ == "__main__":
         "lr_decay_step" : 20,
         "log_interval" : 20,
         "name" : "exp",
-        "data_dir" : 'datasets/train/images',
+        "data_dir" : '/data/ephemeral/home/datasets/train/images',
         "model_dir" : os.environ.get("SM_MODEL_DIR", "./model")
     }
     print(config)
