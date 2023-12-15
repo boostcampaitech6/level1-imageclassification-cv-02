@@ -1,28 +1,40 @@
-import redis, json, time, os
+import redis, json, time, os, argparse
 
 if __name__ == "__main__":
-    redis_server = redis.Redis(host='10.28.224.12', port=30002, db=0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ip", type=str, required=True, help="redis ip"
+    )
+    parser.add_argument(
+        "--port", type=int, required=True, help="redis port"
+    )
+    parser.add_argument(
+        "--user", type=str, required=True, help="user name"
+    )
+    args = parser.parse_args()
 
+    redis_server = redis.Redis(host=args.ip, port=args.port, db=0)
+    
     config = {
-        "mode" :  "train", # train or eval
-        "experiment_name" : "hyun_test_experiment",
+        "mode" :  "train",
         "seed" : 42,
-        "epochs" : 1,
+        "epochs" : 5,
         "dataset" : "MaskBaseDataset",
         "augmentation" : "BaseAugmentation",
-        "resize" : [128, 96],
+        "resize" : [512, 384],
         "batch_size" : 64,
-        "valid_batch_size" : 1000,
+        "valid_batch_size" : 64,
         "model" : "BaseModel",
         "optimizer" : "SGD",
         "lr" : 1e-3,
         "val_ratio" : 0.2,
         "criterion" : "cross_entropy",
         "lr_decay_step" : 20,
-        "log_interval" : 20,
-        "name" : "exp",
+        "log_interval" : 10,
         "data_dir" : '/data/ephemeral/home/datasets/train/images',
         "model_dir" : os.environ.get("SM_MODEL_DIR", "./model")
     }
+    experiment_name = f"{time.strftime('%y%m%d%H%M')}_{args.user}_{config['model']}_{config['optimizer']}_{config['criterion']}_{config['batch_size']}_{config['augmentation']}_{config['epochs']}"
+    config["name"] = experiment_name
     print(config)
-    redis_server.lpush('train', json.dumps(config))
+    redis_server.lpush(config["mode"], json.dumps(config))
