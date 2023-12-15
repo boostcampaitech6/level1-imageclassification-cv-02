@@ -19,6 +19,22 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import MaskBaseDataset
 from loss import create_criterion
 
+from git import Repo, exc
+
+repo_path = os.getcwd()
+
+def pull_repo(repo_path):
+    try:
+        repo = Repo(repo_path)
+        current = repo.head.commit
+        repo.remotes.origin.pull()
+        if current != repo.head.commit:
+            print("새로운 업데이트가 pull 되었습니다.")
+            print(repo.head.commit)
+        else:
+            print("이미 최신 버전 입니다.")
+    except exc.GitCommandError as e:
+        print(f"Git 명령 실행 중 오류 발생: {e}")
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -260,7 +276,7 @@ def train(data_dir, model_dir, args):
 
 
 if __name__ == "__main__":
-
+    pull_repo(repo_path)
 
     parser = argparse.ArgumentParser()
     # Data and model checkpoints directories
@@ -350,7 +366,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     
-    redis_server = redis.Redis(host='10.28.224.190', port=30062, db=0)
+    redis_server = redis.Redis(host='10.28.224.12', port=30002, db=0)
     while True:
         element = redis_server.brpop(keys='train', timeout=None) # 큐가 비어있을 때 대기
         config = json.loads(element[1].decode('utf-8'))
@@ -376,4 +392,5 @@ if __name__ == "__main__":
         data_dir = args.data_dir
         model_dir = args.model_dir
         print(args)
+        pull_repo(repo_path)
         train(data_dir, model_dir, args)
