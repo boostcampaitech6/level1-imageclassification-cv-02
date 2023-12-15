@@ -19,6 +19,10 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import MaskBaseDataset
 from loss import create_criterion
 
+import wandb
+import logging
+import logging.handlers
+import traceback
 from git import Repo, exc
 
 repo_path = os.getcwd()
@@ -35,6 +39,18 @@ def pull_repo(repo_path):
             print("이미 최신 버전 입니다.")
     except exc.GitCommandError as e:
         print(f"Git 명령 실행 중 오류 발생: {e}")
+
+def set_logger(log_path):
+    train_logger = logging.getLogger(log_path)
+    train_logger.setLevel(level=logging.DEBUG)
+    formatter = logging.Formatter('[%(asctime)s][%(levelname)s] >> %(message)s')
+    fileHandler = logging.handlers.TimedRotatingFileHandler(filename=log_path, encoding='utf-8')
+    fileHandler.setFormatter(formatter)
+    train_logger.addHandler(fileHandler)
+    streamHandler = logging.StreamHandler()
+    streamHandler.setFormatter(formatter)
+    train_logger.addHandler(streamHandler)
+    return train_logger
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -107,7 +123,36 @@ def increment_path(path, exist_ok=False):
         return f"{path}{n}"
 
 
-def train(data_dir, model_dir, args):
+def train(data_dir, model_dir, args, train_logger):
+    train_logger.info(args)
+    
+    run = wandb.init(
+        project="mask_classification", 
+        # We pass a run name (otherwise it’ll be randomly assigned, like sunshine-lollypop-10)
+        name=args.name,
+        # Track hyperparameters and run metadata
+        config = { 
+            "seed" : args.seed,
+            "epochs" : args.epochs,
+            "dataset" : args.dataset,
+            "augmentation" : args.augmentation,
+            "resize" : args.resize,
+            "batch_size" : args.batch_size,
+            "valid_batch_size" : args.valid_batch_size,
+            "model" : args.model,
+            "optimizer" : args.optimizer,
+            "lr" : args.lr,
+            "val_ratio" : args.val_ratio,
+            "criterion" : args.criterion,
+            "lr_decay_step" : args.lr_decay_step,
+            "log_interval" : args.log_interval,
+            "data_dir" : args.data_dir,
+            "model_dir" : args.model_dir
+        }
+    )
+
+    train_logger.info("wandb init")
+
     seed_everything(args.seed)
 
     save_dir = increment_path(os.path.join(model_dir, args.name))
@@ -115,6 +160,7 @@ def train(data_dir, model_dir, args):
     # -- settings
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
+    train_logger.info(f"cuda device : {device}")
 
     # -- dataset
     dataset_module = getattr(
@@ -138,6 +184,8 @@ def train(data_dir, model_dir, args):
 
     # -- data_loader
     train_set, val_set = dataset.split_dataset()
+    train_logger.info(f"train_set : {len(train_set)}")
+    train_logger.info(f"val_set : {len(val_set)}")
 
     train_loader = DataLoader(
         train_set,
@@ -204,7 +252,9 @@ def train(data_dir, model_dir, args):
                 train_loss = loss_value / args.log_interval
                 train_acc = matches / args.batch_size / args.log_interval
                 current_lr = get_lr(optimizer)
-                print(
+                run.log({"train_loss":train_loss})
+                run.log({"train_acc":train_acc})
+                train_logger.info(
                     f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
                     f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
                 )
@@ -227,7 +277,7 @@ def train(data_dir, model_dir, args):
             val_loss_items = []
             val_acc_items = []
             figure = None
-            for val_batch in val_loader:
+            for idx, val_batch in enumerate(val_loader):
                 inputs, labels = val_batch
                 inputs = inputs.to(device)
                 labels = labels.to(device)
@@ -239,7 +289,7 @@ def train(data_dir, model_dir, args):
                 acc_item = (labels == preds).sum().item()
                 val_loss_items.append(loss_item)
                 val_acc_items.append(acc_item)
-
+                
                 if figure is None:
                     inputs_np = (
                         torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
@@ -257,27 +307,32 @@ def train(data_dir, model_dir, args):
 
             val_loss = np.sum(val_loss_items) / len(val_loader)
             val_acc = np.sum(val_acc_items) / len(val_set)
+            run.log({"val_loss":val_loss})
+            run.log({"val_acc":val_acc})
             best_val_loss = min(best_val_loss, val_loss)
+            
             if val_acc > best_val_acc:
-                print(
+                train_logger.info(
                     f"New best model for val accuracy : {val_acc:4.2%}! saving the best model.."
                 )
                 torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                artifact = wandb.Artifact(args.name, type='model')
+                artifact.add_file(f"{save_dir}/best.pth")
+                run.log_artifact(artifact)
                 best_val_acc = val_acc
             torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
-            print(
+            train_logger.info(
                 f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
                 f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
             )
             logger.add_scalar("Val/loss", val_loss, epoch)
             logger.add_scalar("Val/accuracy", val_acc, epoch)
             logger.add_figure("results", figure, epoch)
-            print()
+    
 
 
 if __name__ == "__main__":
     pull_repo(repo_path)
-
     parser = argparse.ArgumentParser()
     # Data and model checkpoints directories
     parser.add_argument(
@@ -363,10 +418,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR", "./model")
     )
+    parser.add_argument(
+        "--ip", type=str, required=True
+    )
+    parser.add_argument(
+        "--port", type=int, required=True
+    )
 
     args = parser.parse_args()
     
-    redis_server = redis.Redis(host='10.28.224.12', port=30002, db=0)
+    redis_server = redis.Redis(host=args.ip, port=args.port, db=0)
     while True:
         element = redis_server.brpop(keys='train', timeout=None) # 큐가 비어있을 때 대기
         config = json.loads(element[1].decode('utf-8'))
@@ -391,6 +452,15 @@ if __name__ == "__main__":
 
         data_dir = args.data_dir
         model_dir = args.model_dir
-        print(args)
-        pull_repo(repo_path)
-        train(data_dir, model_dir, args)
+
+        if not os.path.exists('logs'): os.mkdir('logs')
+        train_logger = set_logger(f'logs/{args.name}.log')
+        train_logger.info(f"{args.name} Start")
+        try:
+            pull_repo(repo_path)
+            train(data_dir, model_dir, args, train_logger)
+            wandb.finish()
+            train_logger.info(f"{args.name} Finished")
+        except:
+            train_logger.error(traceback.format_exc())
+            wandb.finish()
