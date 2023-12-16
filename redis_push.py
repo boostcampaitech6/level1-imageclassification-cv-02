@@ -32,7 +32,9 @@ if __name__ == "__main__":
         "lr_decay_step" : 20,
         "log_interval" : 10,
         "data_dir" : '/data/ephemeral/home/datasets/train/images',
-        "model_dir" : os.environ.get("SM_MODEL_DIR", "./model")
+        "model_dir" : os.environ.get("SM_MODEL_DIR", "./model"),
+        "kfold" : "None", # None, KFold, Stratified
+        "splits" : 5 # !주의! KFold를 사용하면 epochs * splits 만큼 학습을 진행합니다.
     }
     experiment_name = f"{time.strftime('%y%m%d%H%M')}_{args.user}_{config['model']}_{config['optimizer']}_{config['criterion']}_{config['batch_size']}_{config['augmentation']}_{config['epochs']}"
     config["name"] = experiment_name

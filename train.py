@@ -25,6 +25,9 @@ import logging.handlers
 import traceback
 from git import Repo, exc
 
+from sklearn.model_selection import KFold, StratifiedKFold, GroupKFold
+
+
 repo_path = os.getcwd()
 
 def pull_repo(repo_path):
@@ -147,7 +150,9 @@ def train(data_dir, model_dir, args, train_logger):
             "lr_decay_step" : args.lr_decay_step,
             "log_interval" : args.log_interval,
             "data_dir" : args.data_dir,
-            "model_dir" : args.model_dir
+            "model_dir" : args.model_dir,
+            "kfold" : args.kfold,
+            "splits" : args.splits
         }
     )
 
@@ -182,28 +187,29 @@ def train(data_dir, model_dir, args, train_logger):
     )
     dataset.set_transform(transform)
 
-    # -- data_loader
-    train_set, val_set = dataset.split_dataset()
-    train_logger.info(f"train_set : {len(train_set)}")
-    train_logger.info(f"val_set : {len(val_set)}")
+    if args.kfold == 'None':
+        # -- data_loader
+        train_set, val_set = dataset.split_dataset()
+        train_logger.info(f"train_set : {len(train_set)}")
+        train_logger.info(f"val_set : {len(val_set)}")
 
-    train_loader = DataLoader(
-        train_set,
-        batch_size=args.batch_size,
-        num_workers=multiprocessing.cpu_count() // 2,
-        shuffle=True,
-        pin_memory=use_cuda,
-        drop_last=True,
-    )
+        train_loader = DataLoader(
+            train_set,
+            batch_size=args.batch_size,
+            num_workers=multiprocessing.cpu_count() // 2,
+            shuffle=True,
+            pin_memory=use_cuda,
+            drop_last=True,
+        )
 
-    val_loader = DataLoader(
-        val_set,
-        batch_size=args.valid_batch_size,
-        num_workers=multiprocessing.cpu_count() // 2,
-        shuffle=False,
-        pin_memory=use_cuda,
-        drop_last=True,
-    )
+        val_loader = DataLoader(
+            val_set,
+            batch_size=args.valid_batch_size,
+            num_workers=multiprocessing.cpu_count() // 2,
+            shuffle=False,
+            pin_memory=use_cuda,
+            drop_last=True,
+        )
 
     # -- model
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
@@ -227,107 +233,247 @@ def train(data_dir, model_dir, args, train_logger):
 
     best_val_acc = 0
     best_val_loss = np.inf
-    for epoch in range(args.epochs):
-        # train loop
-        model.train()
-        loss_value = 0
-        matches = 0
-        for idx, train_batch in enumerate(train_loader):
-            inputs, labels = train_batch
-            inputs = inputs.to(device)
-            labels = labels.to(device)
 
-            optimizer.zero_grad()
-
-            outs = model(inputs)
-            preds = torch.argmax(outs, dim=-1)
-            loss = criterion(outs, labels)
-
-            loss.backward()
-            optimizer.step()
-
-            loss_value += loss.item()
-            matches += (preds == labels).sum().item()
-            if (idx + 1) % args.log_interval == 0:
-                train_loss = loss_value / args.log_interval
-                train_acc = matches / args.batch_size / args.log_interval
-                current_lr = get_lr(optimizer)
-                run.log({"train_loss":train_loss})
-                run.log({"train_acc":train_acc})
-                train_logger.info(
-                    f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
-                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
-                )
-                logger.add_scalar(
-                    "Train/loss", train_loss, epoch * len(train_loader) + idx
-                )
-                logger.add_scalar(
-                    "Train/accuracy", train_acc, epoch * len(train_loader) + idx
-                )
-
-                loss_value = 0
-                matches = 0
-
-        scheduler.step()
-
-        # val loop
-        with torch.no_grad():
-            print("Calculating validation results...")
-            model.eval()
-            val_loss_items = []
-            val_acc_items = []
-            figure = None
-            for idx, val_batch in enumerate(val_loader):
-                inputs, labels = val_batch
+    if args.kfold == 'None':
+        for epoch in range(args.epochs):
+            # train loop
+            model.train()
+            loss_value = 0
+            matches = 0
+            for idx, train_batch in enumerate(train_loader):
+                inputs, labels = train_batch
                 inputs = inputs.to(device)
                 labels = labels.to(device)
 
+                optimizer.zero_grad()
+
                 outs = model(inputs)
                 preds = torch.argmax(outs, dim=-1)
+                loss = criterion(outs, labels)
 
-                loss_item = criterion(outs, labels).item()
-                acc_item = (labels == preds).sum().item()
-                val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)
+                loss.backward()
+                optimizer.step()
+
+                loss_value += loss.item()
+                matches += (preds == labels).sum().item()
+                if (idx + 1) % args.log_interval == 0:
+                    train_loss = loss_value / args.log_interval
+                    train_acc = matches / args.batch_size / args.log_interval
+                    current_lr = get_lr(optimizer)
+                    run.log({"train_loss":train_loss})
+                    run.log({"train_acc":train_acc})
+                    train_logger.info(
+                        f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
+                        f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                    )
+                    logger.add_scalar(
+                        "Train/loss", train_loss, epoch * len(train_loader) + idx
+                    )
+                    logger.add_scalar(
+                        "Train/accuracy", train_acc, epoch * len(train_loader) + idx
+                    )
+
+                    loss_value = 0
+                    matches = 0
+
+            scheduler.step()
+
+            # val loop
+            with torch.no_grad():
+                print("Calculating validation results...")
+                model.eval()
+                val_loss_items = []
+                val_acc_items = []
+                figure = None
+                for idx, val_batch in enumerate(val_loader):
+                    inputs, labels = val_batch
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+
+                    outs = model(inputs)
+                    preds = torch.argmax(outs, dim=-1)
+
+                    loss_item = criterion(outs, labels).item()
+                    acc_item = (labels == preds).sum().item()
+                    val_loss_items.append(loss_item)
+                    val_acc_items.append(acc_item)
+                    
+                    if figure is None:
+                        inputs_np = (
+                            torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                        )
+                        inputs_np = dataset_module.denormalize_image(
+                            inputs_np, dataset.mean, dataset.std
+                        )
+                        figure = grid_image(
+                            inputs_np,
+                            labels,
+                            preds,
+                            n=16,
+                            shuffle=args.dataset != "MaskSplitByProfileDataset",
+                        )
+
+                val_loss = np.sum(val_loss_items) / len(val_loader)
+                val_acc = np.sum(val_acc_items) / len(val_set)
+                run.log({"val_loss":val_loss})
+                run.log({"val_acc":val_acc})
+                best_val_loss = min(best_val_loss, val_loss)
                 
-                if figure is None:
-                    inputs_np = (
-                        torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                if val_acc > best_val_acc:
+                    train_logger.info(
+                        f"New best model for val accuracy : {val_acc:4.2%}! saving the best model.."
                     )
-                    inputs_np = dataset_module.denormalize_image(
-                        inputs_np, dataset.mean, dataset.std
-                    )
-                    figure = grid_image(
-                        inputs_np,
-                        labels,
-                        preds,
-                        n=16,
-                        shuffle=args.dataset != "MaskSplitByProfileDataset",
-                    )
-
-            val_loss = np.sum(val_loss_items) / len(val_loader)
-            val_acc = np.sum(val_acc_items) / len(val_set)
-            run.log({"val_loss":val_loss})
-            run.log({"val_acc":val_acc})
-            best_val_loss = min(best_val_loss, val_loss)
-            
-            if val_acc > best_val_acc:
+                    torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                    artifact = wandb.Artifact(args.name, type='model')
+                    artifact.add_file(f"{save_dir}/best.pth")
+                    run.log_artifact(artifact)
+                    best_val_acc = val_acc
+                torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
                 train_logger.info(
-                    f"New best model for val accuracy : {val_acc:4.2%}! saving the best model.."
+                    f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
+                    f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
                 )
-                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                artifact = wandb.Artifact(args.name, type='model')
-                artifact.add_file(f"{save_dir}/best.pth")
-                run.log_artifact(artifact)
-                best_val_acc = val_acc
-            torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
-            train_logger.info(
-                f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
-                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
-            )
-            logger.add_scalar("Val/loss", val_loss, epoch)
-            logger.add_scalar("Val/accuracy", val_acc, epoch)
-            logger.add_figure("results", figure, epoch)
+                logger.add_scalar("Val/loss", val_loss, epoch)
+                logger.add_scalar("Val/accuracy", val_acc, epoch)
+                logger.add_figure("results", figure, epoch)
+
+    else:
+        for epoch in range(args.epochs):
+            # data loader for kfold
+
+            n_splits = args.splits
+            if args.kfold == 'KFold':
+                kf = KFold(n_splits=n_splits, shuffle=True, random_state=args.seed)
+            elif args.kfold == 'Stratified':
+                kf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=args.seed)
+            fold = 0
+
+            for train_index, val_index in kf.split(dataset.image_paths, dataset.mask_labels):
+                fold += 1
+                print(f"Fold [{fold}/{n_splits}]")
+
+                train_subset = torch.utils.data.Subset(dataset, train_index)
+                val_subset = torch.utils.data.Subset(dataset, val_index)
+
+                train_loader = DataLoader(
+                    train_subset,
+                    batch_size=args.batch_size,
+                    num_workers=multiprocessing.cpu_count() // 2,
+                    shuffle=True,
+                    pin_memory=use_cuda,
+                    drop_last=True,
+                )
+
+                val_loader = DataLoader(
+                    val_subset,
+                    batch_size=args.valid_batch_size,
+                    num_workers=multiprocessing.cpu_count() // 2,
+                    shuffle=False,
+                    pin_memory=use_cuda,
+                    drop_last=True,
+                )
+
+
+                # train loop
+                model.train()
+                loss_value = 0
+                matches = 0
+                for idx, train_batch in enumerate(train_loader):
+                    inputs, labels = train_batch
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+
+                    optimizer.zero_grad()
+
+                    outs = model(inputs)
+                    preds = torch.argmax(outs, dim=-1)
+                    loss = criterion(outs, labels)
+
+                    loss.backward()
+                    optimizer.step()
+
+                    loss_value += loss.item()
+                    matches += (preds == labels).sum().item()
+                    if (idx + 1) % args.log_interval == 0:
+                        train_loss = loss_value / args.log_interval
+                        train_acc = matches / args.batch_size / args.log_interval
+                        current_lr = get_lr(optimizer)
+                        run.log({"train_loss":train_loss})
+                        run.log({"train_acc":train_acc})
+                        train_logger.info(
+                            f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
+                            f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                        )
+                        logger.add_scalar(
+                            "Train/loss", train_loss, epoch * len(train_loader) + idx
+                        )
+                        logger.add_scalar(
+                            "Train/accuracy", train_acc, epoch * len(train_loader) + idx
+                        )
+
+                        loss_value = 0
+                        matches = 0
+
+                scheduler.step()
+
+                # val loop
+                with torch.no_grad():
+                    print("Calculating validation results...")
+                    model.eval()
+                    val_loss_items = []
+                    val_acc_items = []
+                    figure = None
+                    for val_batch in val_loader:
+                        inputs, labels = val_batch
+                        inputs = inputs.to(device)
+                        labels = labels.to(device)
+
+                        outs = model(inputs)
+                        preds = torch.argmax(outs, dim=-1)
+
+                        loss_item = criterion(outs, labels).item()
+                        acc_item = (labels == preds).sum().item()
+                        val_loss_items.append(loss_item)
+                        val_acc_items.append(acc_item)
+
+                        if figure is None:
+                            inputs_np = (
+                                torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                            )
+                            inputs_np = dataset_module.denormalize_image(
+                                inputs_np, dataset.mean, dataset.std
+                            )
+                            figure = grid_image(
+                                inputs_np,
+                                labels,
+                                preds,
+                                n=16,
+                                shuffle=args.dataset != "MaskSplitByProfileDataset",
+                            )
+
+                    val_loss = np.sum(val_loss_items) / len(val_loader)
+                    val_acc = np.sum(val_acc_items) / len(val_set)
+                    run.log({"val_loss":val_loss})
+                    run.log({"val_acc":val_acc})
+                    best_val_loss = min(best_val_loss, val_loss)
+                    
+                    if val_acc > best_val_acc:
+                        train_logger.info(
+                            f"New best model for val accuracy : {val_acc:4.2%}! saving the best model.."
+                        )
+                        torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                        artifact = wandb.Artifact(args.name, type='model')
+                        artifact.add_file(f"{save_dir}/best.pth")
+                        run.log_artifact(artifact)
+                        best_val_acc = val_acc
+                    torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
+                    train_logger.info(
+                        f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
+                        f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
+                    )
+                    logger.add_scalar("Val/loss", val_loss, epoch)
+                    logger.add_scalar("Val/accuracy", val_acc, epoch)
+                    logger.add_figure("results", figure, epoch)
     
 
 
@@ -409,6 +555,19 @@ if __name__ == "__main__":
         "--name", default="exp", help="model save at {SM_MODEL_DIR}/{name}"
     )
 
+    parser.add_argument(
+        "--kfold",
+        type=str,
+        default="None",
+        help="choose KFold [None, KFold, Stratified] (default: None)",
+    )
+    parser.add_argument(
+        "--splits",
+        type=int,
+        default=5,
+        help="n_splits when use KFold (default: 5)",
+    )
+
     # Container environment
     parser.add_argument(
         "--data_dir",
@@ -449,6 +608,9 @@ if __name__ == "__main__":
         args.name = config['name']
         args.data_dir = config['data_dir']
         args.model_dir = config['model_dir']
+
+        args.kfold = config['kfold']
+        args.splits = config['splits']
 
         data_dir = args.data_dir
         model_dir = args.model_dir
