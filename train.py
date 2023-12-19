@@ -36,8 +36,11 @@ def restart_program():
     python = sys.executable
     os.execl(python, python, *sys.argv)
 
-def is_queue_empty(redis_instance, queue_name):
-    queue_length = redis_instance.llen(queue_name)
+def is_queue_empty(redis_instance, queue_list):
+    queue_length = 0
+    for queue_name in queue_list:
+        queue_length += redis_instance.llen(queue_name)
+
     return queue_length == 0
 
 def pull_repo(repo_path):
@@ -379,7 +382,7 @@ if __name__ == "__main__":
         "--port", type=int, required=True
     )
     parser.add_argument(
-        "--mode", type=str, required=True
+        "--mode", type=str, nargs='+', required=True
     )
 
     args = parser.parse_args()
