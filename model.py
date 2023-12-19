@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
-
+from torchvision import models
 
 class BaseModel(nn.Module):
     """
@@ -67,3 +67,22 @@ class MyModel(nn.Module):
         2. 결과로 나온 output 을 return 해주세요
         """
         return x
+    
+# Custom Model Template
+class Resnet34CategoryModel(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        resnet_model = models.resnet34(pretrained=True)
+        num_ftrs = resnet_model.fc.in_features
+        self.softmax = nn.Softmax()
+        self.resnet = nn.Sequential(*list(resnet_model.children())[:-1])
+        self.mask_linear = nn.Linear(num_ftrs, 3)
+        self.gender_linear = nn.Linear(num_ftrs, 2)
+        self.age_linear = nn.Linear(num_ftrs, 3)
+    def forward(self, x):
+        x = self.resnet(x)
+        x = x.squeeze(3).squeeze(2)
+        mask_prediction = self.mask_linear(x)
+        gender_prediction = self.gender_linear(x)
+        age_prediction = self.age_linear(x)
+        return mask_prediction, gender_prediction, age_prediction

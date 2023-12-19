@@ -3,6 +3,7 @@ import multiprocessing
 import os
 from importlib import import_module
 
+import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
@@ -39,61 +40,63 @@ def load_model(saved_model, num_classes, device):
 @torch.no_grad()
 def inference(data_dir, model_dir, output_dir, args):
     """
-    모델 추론을 수행하는 함수
-
-    Args:
-        data_dir (str): 테스트 데이터가 있는 디렉토리 경로
-        model_dir (str): 모델 가중치가 저장된 디렉토리 경로
-        output_dir (str): 결과 CSV를 저장할 디렉토리 경로
-        args (argparse.Namespace): 커맨드 라인 인자
-
-    Returns:
-        None
     """
-
-    # CUDA를 사용할 수 있는지 확인
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    # 클래스의 개수를 설정한다. (마스크, 성별, 나이의 조합으로 18)
-    num_classes = MaskBaseDataset.num_classes  # 18
-    model = load_model(model_dir, num_classes, device).to(device)
-    model.eval()
+    num_classes = MaskBaseDataset.num_classes  # 18    
+    models = []
+    for i in range(5):
+        model_fold_dir = os.path.join(model_dir, f'fold{i}')
+        model = load_model(model_fold_dir, num_classes, device).to(device)
+        models.append(model)
+        
+    for model in models:
+        model.eval()
 
-    # 이미지 파일 경로와 정보 파일을 읽어온다.
-    img_root = os.path.join(data_dir, "images")
-    info_path = os.path.join(data_dir, "info.csv")
+    img_root = os.path.join(data_dir, 'images')
+    info_path = os.path.join(data_dir, 'info.csv')
     info = pd.read_csv(info_path)
 
-    # 이미지 경로를 리스트로 생성한다.
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
     dataset = TestDataset(img_paths, args.resize)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
-        num_workers=multiprocessing.cpu_count() // 2,
+        num_workers=0,
         shuffle=False,
         pin_memory=use_cuda,
         drop_last=False,
     )
 
     print("Calculating inference results..")
-    preds = []
-    with torch.no_grad():
-        for idx, images in enumerate(loader):
-            images = images.to(device)
-            if not args.category_train:
-                pred = model(images)
-                pred = pred.argmax(dim=-1)
-            else:
-                mask_pred, gender_pred, age_pred = model(images)
-                mask_pred, gender_pred, age_pred = mask_pred.argmax(dim=-1), gender_pred.argmax(dim=-1), age_pred.argmax(dim=-1)
-                pred = mask_pred * 6 + gender_pred * 3 + age_pred
-            preds.extend(pred.cpu().numpy())
+    # 폴드의 수만큼 예측 결과를 저장할 리스트를 초기화
+    all_preds = [[] for _ in range(len(models))]
+    # 각 모델에 대한 추론을 실행
+    for model_idx, model in enumerate(models):
+        preds = []
+        with torch.no_grad():
+            for idx, images in enumerate(loader):
+                images = images.to(device)
+                if not args.category_train:
+                    pred = model(images)
+                    pred = pred.argmax(dim=-1)
+                else:
+                    mask_pred, gender_pred, age_pred = model(images)
+                    mask_pred, gender_pred, age_pred = mask_pred.argmax(dim=-1), gender_pred.argmax(dim=-1), age_pred.argmax(dim=-1)
+                    pred = mask_pred * 6 + gender_pred * 3 + age_pred
+                preds.extend(pred.cpu().numpy())
+        all_preds[model_idx] = preds
 
-    # 예측 결과를 데이터프레임에 저장하고 csv 파일로 출력한다.
-    info["ans"] = preds
-    save_path = os.path.join(output_dir, f"output.csv")
+    final_preds = []
+    for idx in range(len(all_preds[0])):
+        # 각 샘플에 대해, 모든 폴드에서 가장 많이 예측된 클래스를 선택합니다.
+        voting = np.bincount([all_preds[model_idx][idx] for model_idx in range(len(models))])
+        final_pred = voting.argmax()
+        final_preds.append(final_pred)
+        
+    info['ans'] = final_preds
+    save_path = os.path.join(output_dir, f'output.csv')
     info.to_csv(save_path, index=False)
     print(f"Inference Done! Inference result saved at {save_path}")
 
@@ -106,18 +109,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=1000,
+        default=64,
         help="input batch size for validing (default: 1000)",
     )
     parser.add_argument(
         "--resize",
         nargs=2,
         type=int,
-        default=(96, 128),
+        default=(512, 384),
         help="resize size for image when you trained (default: (96, 128))",
     )
     parser.add_argument(
-        "--model", type=str, default="BaseModel", help="model type (default: BaseModel)"
+        "--model", type=str, default="Hyun_Resnet34_Model", help="model type (default: BaseModel)"
     )
 
     # 컨테이너 환경 변수
@@ -135,9 +138,6 @@ if __name__ == "__main__":
         "--output_dir",
         type=str,
         default=os.environ.get("SM_OUTPUT_DATA_DIR", "./output"),
-    )
-    parser.add_argument(
-        "--k_fold", type=int, default=-1
     )
     parser.add_argument(
         "--category_train", type=bool, default=False

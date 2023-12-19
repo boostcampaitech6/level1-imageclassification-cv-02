@@ -18,21 +18,23 @@ if __name__ == "__main__":
     config = {
         "mode" :  "train",
         "seed" : 42,
-        "epochs" : 5,
+        "epochs" : 20,
         "dataset" : "MaskBaseDataset",
         "augmentation" : "BaseAugmentation",
         "resize" : [512, 384],
         "batch_size" : 64,
         "valid_batch_size" : 64,
         "model" : "BaseModel",
-        "optimizer" : "SGD",
+        "optimizer" : "Adam",
         "lr" : 1e-3,
         "val_ratio" : 0.2,
         "criterion" : "cross_entropy",
         "lr_decay_step" : 20,
         "log_interval" : 10,
         "data_dir" : '/data/ephemeral/home/datasets/train/images',
-        "model_dir" : os.environ.get("SM_MODEL_DIR", "./model")
+        "model_dir" : os.environ.get("SM_MODEL_DIR", "./model"),
+        "k_fold" : -1,
+        "category_train" : False
     }
     experiment_name = f"{time.strftime('%y%m%d%H%M')}_{args.user}_{config['model']}_{config['optimizer']}_{config['criterion']}_{config['batch_size']}_{config['augmentation']}_{config['epochs']}"
     config["name"] = experiment_name
