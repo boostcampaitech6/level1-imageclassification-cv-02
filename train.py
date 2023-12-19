@@ -206,7 +206,7 @@ def train(data_dir, model_dir, args, train_logger):
     )  # default: MaskBaseDataset
     dataset = dataset_module(
         data_dir=data_dir,
-        cate_train=args.category_train
+        category_train=args.category_train
     )
 
     # -- augmentation

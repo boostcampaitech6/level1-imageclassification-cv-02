@@ -255,7 +255,7 @@ def training(model, train_set, val_set, criterion, optimizer, scheduler, dataset
                 logger.add_scalar("Val/mask accuracy", val_mask_acc, epoch)
                 logger.add_scalar("Val/gender accuracy", val_gender_acc, epoch)
                 logger.add_scalar("Val/age accuracy", val_age_acc, epoch)
-                # logger.add_figure("results", figure, epoch)
+                logger.add_figure("results", figure, epoch)
                 print()
     
     else:
