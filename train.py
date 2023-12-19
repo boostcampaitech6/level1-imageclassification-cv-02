@@ -25,9 +25,20 @@ import wandb
 import logging
 import logging.handlers
 import traceback
+
 from git import Repo, exc
+import sys
+import time
 
 repo_path = os.getcwd()
+
+def restart_program():
+    python = sys.executable
+    os.execl(python, python, *sys.argv)
+
+def is_queue_empty(redis_instance, queue_name):
+    queue_length = redis_instance.llen(queue_name)
+    return queue_length == 0
 
 def pull_repo(repo_path):
     try:
@@ -36,7 +47,8 @@ def pull_repo(repo_path):
         repo.remotes.origin.pull()
         if current != repo.head.commit:
             print("새로운 업데이트가 pull 되었습니다.")
-            print(repo.head.commit)
+            print("프로세스를 재시작합니다.")
+            restart_program() #변경사항이 존재하면 현재 arg값 그대로 프로세스 재시작
         else:
             print("이미 최신 버전 입니다.")
     except exc.GitCommandError as e:
@@ -266,7 +278,7 @@ def train(data_dir, model_dir, args, train_logger):
             training(model, train_set, val_set, criterion, optimizer, scheduler, dataset, dataset_module, device, train_logger, run, fold_dir, args)
 
 if __name__ == "__main__":
-    # pull_repo(repo_path)
+    pull_repo(repo_path)
     parser = argparse.ArgumentParser()
     # Data and model checkpoints directories
     parser.add_argument(
@@ -366,45 +378,52 @@ if __name__ == "__main__":
     parser.add_argument(
         "--port", type=int, required=True
     )
+    parser.add_argument(
+        "--mode", type=str, required=True
+    )
 
     args = parser.parse_args()
     
     redis_server = redis.Redis(host=args.ip, port=args.port, db=0)
     while True:
-        element = redis_server.brpop(keys='train_hyun', timeout=None) # 큐가 비어있을 때 대기
-        config = json.loads(element[1].decode('utf-8'))
 
-        args.seed = config['seed']
-        args.epochs = config['epochs']
-        args.dataset = config['dataset']
-        args.augmentation = config['augmentation']
-        args.resize = config['resize']
-        args.batch_size = config['batch_size']
-        args.valid_batch_size = config['valid_batch_size']
-        args.model = config['model']
-        args.optimizer = config['optimizer']
-        args.lr = config['lr']
-        args.val_ratio = config['val_ratio']
-        args.criterion = config['criterion']
-        args.lr_decay_step = config['lr_decay_step']
-        args.log_interval = config['log_interval']
-        args.name = config['name']
-        args.data_dir = config['data_dir']
-        args.model_dir = config['model_dir']
-        args.k_fold = config['k_fold']
-        args.category_train = config['category_train']
+        if not is_queue_empty(redis_server, args.mode): # queue에 message가 존재하면 진입
+            pull_repo(repo_path) #git pull
+            element = redis_server.brpop(keys=args.mode, timeout=None)
+            config = json.loads(element[1].decode('utf-8'))
 
-        data_dir = args.data_dir
-        model_dir = args.model_dir
+            args.seed = config['seed']
+            args.epochs = config['epochs']
+            args.dataset = config['dataset']
+            args.augmentation = config['augmentation']
+            args.resize = config['resize']
+            args.batch_size = config['batch_size']
+            args.valid_batch_size = config['valid_batch_size']
+            args.model = config['model']
+            args.optimizer = config['optimizer']
+            args.lr = config['lr']
+            args.val_ratio = config['val_ratio']
+            args.criterion = config['criterion']
+            args.lr_decay_step = config['lr_decay_step']
+            args.log_interval = config['log_interval']
+            args.name = config['name']
+            args.data_dir = config['data_dir']
+            args.model_dir = config['model_dir']
+            args.k_fold = config['k_fold']
+            args.category_train = config['category_train']
 
-        if not os.path.exists('logs'): os.mkdir('logs')
-        train_logger = set_logger(f'logs/{args.name}.log')
-        train_logger.info(f"{args.name} Start")
-        try:
-            # pull_repo(repo_path)
-            train(data_dir, model_dir, args, train_logger)
-            wandb.finish()
-            train_logger.info(f"{args.name} Finished")
-        except:
-            train_logger.error(traceback.format_exc())
-            wandb.finish()
+            data_dir = args.data_dir
+            model_dir = args.model_dir
+
+            if not os.path.exists('logs'): os.mkdir('logs')
+            train_logger = set_logger(f'logs/{args.name}.log')
+            train_logger.info(f"{args.name} Start")
+            try:
+                train(data_dir, model_dir, args, train_logger)
+                wandb.finish()
+                train_logger.info(f"{args.name} Finished")
+            except:
+                train_logger.error(traceback.format_exc())
+                wandb.finish()
+        else:
+            time.sleep(10)
