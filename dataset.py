@@ -181,19 +181,23 @@ class MaskBaseDataset(Dataset):
         "normal": MaskLabels.NORMAL,
     }
 
-    image_paths = []
-    mask_labels = []
-    gender_labels = []
-    age_labels = []
+    
 
     def __init__(
         self,
         data_dir,
+        category_train,
         mean=(0.548, 0.504, 0.479),
         std=(0.237, 0.247, 0.246),
         val_ratio=0.2,
     ):
+        self.image_paths = []
+        self.mask_labels = []
+        self.gender_labels = []
+        self.age_labels = []
+        
         self.data_dir = data_dir
+        self.category_train = category_train
         self.mean = mean
         self.std = std
         self.val_ratio = val_ratio
@@ -263,7 +267,10 @@ class MaskBaseDataset(Dataset):
         multi_class_label = self.encode_multi_class(mask_label, gender_label, age_label)
 
         image_transform = self.transform(image)
-        return image_transform, multi_class_label
+        if self.category_train:
+            return image_transform, mask_label, gender_label, age_label
+        else:
+            return image_transform, multi_class_label
 
     def __len__(self):
         """데이터셋의 길이를 반환하는 메서드"""
