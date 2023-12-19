@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+import timm
 
 class BaseModel(nn.Module):
     """
@@ -86,3 +87,37 @@ class Resnet34CategoryModel(nn.Module):
         gender_prediction = self.gender_linear(x)
         age_prediction = self.age_linear(x)
         return mask_prediction, gender_prediction, age_prediction
+
+class custom_resnet34(nn.Module):
+    #input size: 224,224
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet = models.resnet34(pretrained=True)
+        num_features = self.resnet.fc.in_features
+        self.resnet.fc = nn.Linear(num_features, num_classes)
+    
+    def forward(self,x):
+        x = self.resnet(x)
+        return x
+
+class custom_resnet50(nn.Module):
+    #input size: 224,224
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet = models.resnet50(pretrained=True)
+        num_features = self.resnet.fc.in_features
+        self.resnet.fc = nn.Linear(num_features, num_classes)
+    
+    def forward(self,x):
+        x = self.resnet(x)
+        return x
+
+class sh_vit_model(nn.Module):
+    #input size: 
+    def __init__(self, num_classes):
+        super().__init__()
+        self.vitmodel = timm.create_model('vit_base_patch16_224', pretrained=True, num_classes=num_classes)
+
+    def forward(self, x):
+        x = self.vitmodel(x)
+        return x
