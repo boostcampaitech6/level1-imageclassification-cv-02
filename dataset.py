@@ -181,8 +181,6 @@ class MaskBaseDataset(Dataset):
         "normal": MaskLabels.NORMAL,
     }
 
-    
-
     def __init__(
         self,
         data_dir,
