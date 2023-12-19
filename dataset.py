@@ -17,6 +17,9 @@ from torchvision.transforms import (
     ColorJitter,
 )
 
+import imgaug.augmenters as iaa
+
+
 # 지원되는 이미지 확장자 리스트
 IMG_EXTENSIONS = [
     ".jpg",
@@ -422,3 +425,28 @@ class TestDataset(Dataset):
     def __len__(self):
         """데이터셋의 길이를 반환하는 메서드"""
         return len(self.img_paths)
+
+class ImgaugAugmentation:
+    def __init__(self, resize, mean, std):
+        self.imgaug_transform= iaa.Sequential([
+                            iaa.Affine(rotate=(-5, 5)),  # 무작위 회전 (-45도부터 45도까지)
+                            iaa.Fliplr(0.5),  # 50% 확률로 좌우 반전
+                            iaa.GaussianBlur(sigma=(0, 3.0)),  # 가우시안 블러 적용
+                            iaa.AdditiveGaussianNoise(scale=(0, 0.1 * 255)),  # 가우시안 노이즈 추가
+                            iaa.Resize({"height": resize[0], "width": resize[1]}) # 지정된 사이즈로 크기 조정
+                            # iaa.Resize({"height": (0.8, 1.2), "width": (0.8, 1.2)}),  # 크기 조정
+                            # iaa.Grayscale(alpha=(0.0, 1.0)),  # 그레이스케일 변환
+                            # iaa.Crop(percent=(0, 0.2))  # 이미지 일부 잘라내기
+                        ])
+        self.torch_transform = Compose(
+            [
+                ColorJitter(0.1, 0.1, 0.1, 0.1),
+                ToTensor(),
+                Normalize(mean=mean, std=std),
+                # AddGaussianNoise(), # 위에 이미 Gaussian이 있어 제거
+            ]
+        )
+    def __call__(self, image):
+        trans_img = self.imgaug_transform(image=np.array(image))
+        result_img = self.torch_transform(Image.fromarray(trans_img))
+        return result_img
