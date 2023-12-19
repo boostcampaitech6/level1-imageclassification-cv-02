@@ -28,6 +28,7 @@ import traceback
 
 from git import Repo, exc
 import sys
+import time
 
 repo_path = os.getcwd()
 
@@ -424,3 +425,5 @@ if __name__ == "__main__":
             except:
                 train_logger.error(traceback.format_exc())
                 wandb.finish()
+        else:
+            time.sleep(10)
