@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 import timm
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig, AutoModel, ViTForImageClassification, ViTFeatureExtractor
 
 
 class BaseModel(nn.Module):
@@ -210,3 +210,39 @@ class EfficientNet_b2(nn.Module): # input size 260 260
         x = self.fc(x)
 
         return x
+
+class torchvision_VIT(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = models.vit_b_32()
+        in_features = 768
+        self.model.heads[-1] = nn.Linear(in_features, num_classes)
+
+    def forward(self, x):
+        return self.model(x)
+
+class age_VIT(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.vit_model = ViTForImageClassification.from_pretrained('nateraw/vit-age-classifier')
+        #self.transforms = ViTFeatureExtractor.from_pretrained('nateraw/vit-age-classifier')
+
+        # Modify the last layer of the pre-trained model to match the number of classes
+        self.vit_model.classifier = nn.Linear(self.vit_model.config.hidden_size, num_classes)
+
+    def forward(self, x):
+        # Forward pass through the ViT model
+        #inputs = self.transforms(x, return_tensors='pt')
+        outputs = self.vit_model(x)
+
+        # Extract logits and apply linear layer
+        logits = outputs.logits
+        return logits
+    
+class pytorch_VIT(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = ViT('B_16_imagenet1k', pretrained=True, num_classes=num_classes, image_size=384)
+
+    def forward(self, x):
+        return self.model(x)
