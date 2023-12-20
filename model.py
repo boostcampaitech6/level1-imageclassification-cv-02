@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+import pytorch_pretrained_vit as ViT
 import timm
 from transformers import AutoConfig, AutoModel, ViTForImageClassification, ViTFeatureExtractor
 
