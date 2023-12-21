@@ -58,7 +58,7 @@ def training(model, train_set, val_set, criterion, optimizer, scheduler, dataset
     train_logger.info(f"train_set : {len(train_set)}")
     train_logger.info(f"val_set : {len(val_set)}")
     
-    num_workers = multiprocessing.cpu_count()//2 if args.k_fold == -1 else 0
+    num_workers = multiprocessing.cpu_count()//2
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,
