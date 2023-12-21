@@ -179,6 +179,7 @@ def train(data_dir, model_dir, args, train_logger):
     
     run = wandb.init(
         project="mask_classification", 
+        entity = "ai_tech_6th_cv_level1",
         # We pass a run name (otherwise it’ll be randomly assigned, like sunshine-lollypop-10)
         name=args.name,
         # Track hyperparameters and run metadata
