@@ -239,7 +239,7 @@ def train(data_dir, model_dir, args, train_logger):
     if n_splits == -1:
         # -- data_loader
         train_set, val_set = dataset.split_dataset()
-
+        torch.cuda.empty_cache()
         # -- model
         model = get_model(args.model)
         model = model.to(device)
@@ -268,7 +268,7 @@ def train(data_dir, model_dir, args, train_logger):
 
             # -- data_loader
             train_set, val_set = Subset(dataset, train_idx), Subset(dataset, valid_idx)
-
+            torch.cuda.empty_cache()
             # -- model
             model = get_model(args.model)
             model = model.to(device)
