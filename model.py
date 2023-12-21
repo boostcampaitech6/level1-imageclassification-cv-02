@@ -4,7 +4,7 @@ from torchvision import models
 import timm
 import pytorch_pretrained_vit as ViT
 from transformers import AutoConfig, AutoModel, ViTForImageClassification, ViTFeatureExtractor
-
+from efficientnet_pytorch import EfficientNet
 
 class BaseModel(nn.Module):
     """
@@ -90,7 +90,36 @@ class Resnet34CategoryModel(nn.Module):
         gender_prediction = self.gender_linear(x)
         age_prediction = self.age_linear(x)
         return mask_prediction, gender_prediction, age_prediction
+    
+class Resnet34CategoryDropoutModel(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        resnet_model = models.resnet34(pretrained=True)
+        num_ftrs = resnet_model.fc.in_features
 
+        self.dropout = nn.Dropout(0.2)
+        self.relu = nn.ReLU()
+        self.softmax = nn.Softmax()
+        self.resnet = nn.Sequential(*list(resnet_model.children())[:-1])
+        self.mask_linear = nn.Linear(num_ftrs, 3)
+        self.gender_linear = nn.Linear(num_ftrs, 2)
+        self.age_linear1 = nn.Linear(num_ftrs, 256)
+        self.age_linear2 = nn.Linear(256, 64)
+        self.age_linear3 = nn.Linear(64, 3)
+    def forward(self, x):
+        x = self.resnet(x)
+        x = x.squeeze(3).squeeze(2)
+        mask_prediction = self.mask_linear(x)
+        gender_prediction = self.gender_linear(x)
+
+        age_x = self.age_linear1(x)
+        age_x = self.relu(age_x)
+        age_x = self.dropout(age_x)
+        age_x = self.age_linear2(age_x)
+        age_x = self.relu(age_x)
+        age_prediction = self.age_linear3(age_x)
+        return mask_prediction, gender_prediction, age_prediction
+    
 class custom_resnet34(nn.Module):
     #input size: 224,224
     def __init__(self, num_classes):
@@ -193,7 +222,7 @@ class EfficientNet_b2(nn.Module): # input size 260 260
 
         # Custom layers after EfficientNet
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))  # Adaptive pooling to get a fixed size output
-        self.dropout = nn.Dropout(0.1)  # Adding dropout for regularization
+        self.dropout = nn.Dropout(0.3)  # Adding dropout for regularization
         self.fc = nn.Linear(self.eff_net.config.hidden_dim, num_classes)  # Custom fully connected layer
 
     def forward(self, x):
@@ -207,10 +236,47 @@ class EfficientNet_b2(nn.Module): # input size 260 260
         # Additional custom layers
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)  # Flatten the output for the fully connected layer
-        x = self.dropout(x)  # Applying dropout
+        x = self.dropout(x) # Applying dropout
         x = self.fc(x)
 
         return x
+    
+
+
+class EfficientNet_b5(nn.Module):
+    def __init__(self, num_classes):
+        super(EfficientNet_b5, self).__init__()
+        config = AutoConfig.from_pretrained('google/EfficientNet-b5')
+        self.eff_net = AutoModel.from_pretrained('google/EfficientNet-b5', config=config)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1)) 
+        self.fc = nn.Linear(self.eff_net.config.hidden_dim, num_classes)
+
+    def forward(self, x):
+        eff_net_output = self.eff_net(x)
+        x = eff_net_output.last_hidden_state
+        x = F.relu(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        # x = self.dropout(x) # Applying dropout
+        x = self.fc(x)
+        return x
+
+class MultiTaskEfficientNetB2(nn.Module):
+    def __init__(self, num_classes=3):
+        super(MultiTaskEfficientNetB2, self).__init__()
+        self.base_model = EfficientNet.from_pretrained('efficientnet-b2')
+
+        self.mask_classifier = nn.Linear(self.base_model._fc.in_features, 3)
+        self.gender_classifier = nn.Linear(self.base_model._fc.in_features, 2)
+        self.age_classifier = nn.Linear(self.base_model._fc.in_features, 3)
+
+    def forward(self, x):
+        x = self.base_model.extract_features(x)
+        x = nn.functional.adaptive_avg_pool2d(x, 1).squeeze(-1).squeeze(-1)
+        mask = self.mask_classifier(x)
+        gender = self.gender_classifier(x)
+        age = self.age_classifier(x)
+        return mask, gender, age
 
 class torchvision_VIT(nn.Module):
     def __init__(self, num_classes):
