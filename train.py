@@ -1,11 +1,7 @@
-import argparse
 import glob
-import json
-import multiprocessing
 import os
 import random
 import re
-import redis
 from importlib import import_module
 from pathlib import Path
 
@@ -22,40 +18,6 @@ from loss import create_criterion
 from function import training
 
 import wandb
-import logging
-import logging.handlers
-import traceback
-
-from git import Repo, exc
-import sys
-import time
-
-repo_path = os.getcwd()
-
-def restart_program():
-    python = sys.executable
-    os.execl(python, python, *sys.argv)
-
-def is_queue_empty(redis_instance, queue_list):
-    queue_length = 0
-    for queue_name in queue_list:
-        queue_length += redis_instance.llen(queue_name)
-
-    return queue_length == 0
-
-def pull_repo(repo_path):
-    try:
-        repo = Repo(repo_path)
-        current = repo.head.commit
-        repo.remotes.origin.pull()
-        if current != repo.head.commit:
-            print("새로운 업데이트가 pull 되었습니다.")
-            print("프로세스를 재시작합니다.")
-            restart_program() #변경사항이 존재하면 현재 arg값 그대로 프로세스 재시작
-        else:
-            print("이미 최신 버전 입니다.")
-    except exc.GitCommandError as e:
-        print(f"Git 명령 실행 중 오류 발생: {e}")
 
 def getDataloader(train_set, val_set, batch_size, valid_batch_size, num_workers, use_cuda):
     train_loader = DataLoader(
@@ -77,18 +39,6 @@ def getDataloader(train_set, val_set, batch_size, valid_batch_size, num_workers,
     )
     return train_loader, val_loader
 
-def set_logger(log_path):
-    train_logger = logging.getLogger(log_path)
-    train_logger.setLevel(level=logging.DEBUG)
-    formatter = logging.Formatter('[%(asctime)s][%(levelname)s] >> %(message)s')
-    fileHandler = logging.handlers.TimedRotatingFileHandler(filename=log_path, encoding='utf-8')
-    fileHandler.setFormatter(formatter)
-    train_logger.addHandler(fileHandler)
-    streamHandler = logging.StreamHandler()
-    streamHandler.setFormatter(formatter)
-    train_logger.addHandler(streamHandler)
-    return train_logger
-
 def seed_everything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -98,11 +48,11 @@ def seed_everything(seed):
     np.random.seed(seed)
     random.seed(seed)
 
-def get_optimizer(optimizer_name, m_parameters):
+def get_optimizer(optimizer_name, m_parameters, lr):
     opt_module = getattr(import_module("torch.optim"), optimizer_name)  # default: SGD
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, m_parameters),
-        lr=args.lr,
+        lr=lr,
         weight_decay=5e-4,
     )
     return optimizer
@@ -247,7 +197,7 @@ def train(data_dir, model_dir, args, train_logger):
 
         # -- loss & metric
         criterion = create_criterion(args.criterion)  # default: cross_entropy
-        optimizer = get_optimizer(args.optimizer, model.parameters())
+        optimizer = get_optimizer(args.optimizer, model.parameters(), args.lr)
         scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
 
         training(model, train_set, val_set, criterion, optimizer, scheduler, dataset, dataset_module, device, train_logger, run, save_dir, args)
@@ -276,158 +226,7 @@ def train(data_dir, model_dir, args, train_logger):
 
             # -- loss & metric
             criterion = create_criterion(args.criterion)  # default: cross_entropy
-            optimizer = get_optimizer(args.optimizer, model.parameters())
+            optimizer = get_optimizer(args.optimizer, model.parameters(), args.lr)
             scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
 
             training(model, train_set, val_set, criterion, optimizer, scheduler, dataset, dataset_module, device, train_logger, run, fold_dir, args)
-
-if __name__ == "__main__":
-    pull_repo(repo_path)
-    parser = argparse.ArgumentParser()
-    # Data and model checkpoints directories
-    parser.add_argument(
-        "--seed", type=int, default=42, help="random seed (default: 42)"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=10, help="number of epochs to train (default: 1)"
-    )
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default="MaskBaseDataset",
-        help="dataset augmentation type (default: MaskBaseDataset)",
-    )
-    parser.add_argument(
-        "--augmentation",
-        type=str,
-        default="BaseAugmentation",
-        help="data augmentation type (default: BaseAugmentation)",
-    )
-    parser.add_argument(
-        "--resize",
-        nargs=2,
-        type=int,
-        default=[128, 96],
-        help="resize size for image when training",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=64,
-        help="input batch size for training (default: 64)",
-    )
-    parser.add_argument(
-        "--valid_batch_size",
-        type=int,
-        default=1000,
-        help="input batch size for validing (default: 1000)",
-    )
-    parser.add_argument(
-        "--model", type=str, default="BaseModel", help="model type (default: BaseModel)"
-    )
-    parser.add_argument(
-        "--optimizer", type=str, default="SGD", help="optimizer type (default: SGD)"
-    )
-    parser.add_argument(
-        "--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)"
-    )
-    parser.add_argument(
-        "--val_ratio",
-        type=float,
-        default=0.2,
-        help="ratio for validaton (default: 0.2)",
-    )
-    parser.add_argument(
-        "--criterion",
-        type=str,
-        default="cross_entropy",
-        help="criterion type (default: cross_entropy)",
-    )
-    parser.add_argument(
-        "--lr_decay_step",
-        type=int,
-        default=20,
-        help="learning rate scheduler deacy step (default: 20)",
-    )
-    parser.add_argument(
-        "--log_interval",
-        type=int,
-        default=20,
-        help="how many batches to wait before logging training status",
-    )
-    parser.add_argument(
-        "--name", default="exp", help="model save at {SM_MODEL_DIR}/{name}"
-    )
-
-    # Container environment
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        default=os.environ.get("SM_CHANNEL_TRAIN", "/opt/ml/input/data/train/images"),
-    )
-    parser.add_argument(
-        "--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR", "./model")
-    )
-
-    parser.add_argument(
-        "--k_fold", type=int, default=-1
-    )
-    parser.add_argument(
-        "--category_train", type=bool, default=False
-    )
-
-    parser.add_argument(
-        "--ip", type=str, required=True
-    )
-    parser.add_argument(
-        "--port", type=int, required=True
-    )
-    parser.add_argument(
-        "--mode", type=str, nargs='+', required=True
-    )
-
-    args = parser.parse_args()
-    
-    redis_server = redis.Redis(host=args.ip, port=args.port, db=0)
-    while True:
-
-        if not is_queue_empty(redis_server, args.mode): # queue에 message가 존재하면 진입
-            pull_repo(repo_path) #git pull
-            element = redis_server.brpop(keys=args.mode, timeout=None)
-            config = json.loads(element[1].decode('utf-8'))
-
-            args.seed = config['seed']
-            args.epochs = config['epochs']
-            args.dataset = config['dataset']
-            args.augmentation = config['augmentation']
-            args.resize = config['resize']
-            args.batch_size = config['batch_size']
-            args.valid_batch_size = config['valid_batch_size']
-            args.model = config['model']
-            args.optimizer = config['optimizer']
-            args.lr = config['lr']
-            args.val_ratio = config['val_ratio']
-            args.criterion = config['criterion']
-            args.lr_decay_step = config['lr_decay_step']
-            args.log_interval = config['log_interval']
-            args.name = config['name']
-            args.data_dir = config['data_dir']
-            args.model_dir = config['model_dir']
-            args.k_fold = config['k_fold']
-            args.category_train = config['category_train']
-
-            data_dir = args.data_dir
-            model_dir = args.model_dir
-
-            if not os.path.exists('logs'): os.mkdir('logs')
-            train_logger = set_logger(f'logs/{args.name}.log')
-            train_logger.info(f"{args.name} Start")
-            try:
-                train(data_dir, model_dir, args, train_logger)
-                wandb.finish()
-                train_logger.info(f"{args.name} Finished")
-            except:
-                train_logger.error(traceback.format_exc())
-                wandb.finish()
-        else:
-            time.sleep(10)
