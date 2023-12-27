@@ -16,6 +16,8 @@ if __name__ == "__main__":
     redis_server = redis.Redis(host=args.ip, port=args.port, db=0)
     
     config = {
+        "ip" : args.ip,
+        "port" : args.port,
         "mode" :  "train",
         "seed" : 42,
         "epochs" : 100,

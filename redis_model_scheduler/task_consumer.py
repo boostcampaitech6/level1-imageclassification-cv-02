@@ -2,8 +2,10 @@ import redis
 import wandb
 import os, sys, json, time, traceback, argparse, logging, logging.handlers
 
-from train import train
 from git import Repo, exc
+
+sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
+from train import train
 
 repo_path = os.getcwd()
 
@@ -44,11 +46,12 @@ def set_logger(log_path):
     return train_logger
 
 def json2argparse(config):
-    parser = argparse.ArgumentParser()
+    conf_parser = argparse.ArgumentParser()
     for key, value in config.items():
-        if key == 'mode': continue
-        parser.add_argument(f'--{key}', default=value)
-    return parser.parse_args()
+        # if key == 'mode': continue
+        conf_parser.add_argument(f'--{key}', default=value)
+    conf_args = conf_parser.parse_args()
+    return conf_args
 
 if __name__ == "__main__":
     pull_repo(repo_path)
@@ -72,7 +75,7 @@ if __name__ == "__main__":
             pull_repo(repo_path) #git pull
             element = redis_server.brpop(keys=args.mode, timeout=None)
             config = json.loads(element[1].decode('utf-8'))
-
+            
             conf_args = json2argparse(config)
 
             data_dir = conf_args.data_dir
