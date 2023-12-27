@@ -18,6 +18,22 @@ from loss import create_criterion
 from function import training
 
 import wandb
+import argparse
+import traceback
+import logging
+import logging.handlers
+
+def set_logger(log_path):
+    train_logger = logging.getLogger(log_path)
+    train_logger.setLevel(level=logging.DEBUG)
+    formatter = logging.Formatter('[%(asctime)s][%(levelname)s] >> %(message)s')
+    fileHandler = logging.handlers.TimedRotatingFileHandler(filename=log_path, encoding='utf-8')
+    fileHandler.setFormatter(formatter)
+    train_logger.addHandler(fileHandler)
+    streamHandler = logging.StreamHandler()
+    streamHandler.setFormatter(formatter)
+    train_logger.addHandler(streamHandler)
+    return train_logger
 
 def getDataloader(train_set, val_set, batch_size, valid_batch_size, num_workers, use_cuda):
     train_loader = DataLoader(
@@ -230,3 +246,112 @@ def train(data_dir, model_dir, args, train_logger):
             scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
 
             training(model, train_set, val_set, criterion, optimizer, scheduler, dataset, dataset_module, device, train_logger, run, fold_dir, args)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    # Data and model checkpoints directories
+    parser.add_argument(
+        "--seed", type=int, default=42, help="random seed (default: 42)"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=10, help="number of epochs to train (default: 1)"
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="MaskBaseDataset",
+        help="dataset augmentation type (default: MaskBaseDataset)",
+    )
+    parser.add_argument(
+        "--augmentation",
+        type=str,
+        default="BaseAugmentation",
+        help="data augmentation type (default: BaseAugmentation)",
+    )
+    parser.add_argument(
+        "--resize",
+        nargs=2,
+        type=int,
+        default=[128, 96],
+        help="resize size for image when training",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=64,
+        help="input batch size for training (default: 64)",
+    )
+    parser.add_argument(
+        "--valid_batch_size",
+        type=int,
+        default=1000,
+        help="input batch size for validing (default: 1000)",
+    )
+    parser.add_argument(
+        "--model", type=str, default="BaseModel", help="model type (default: BaseModel)"
+    )
+    parser.add_argument(
+        "--optimizer", type=str, default="SGD", help="optimizer type (default: SGD)"
+    )
+    parser.add_argument(
+        "--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)"
+    )
+    parser.add_argument(
+        "--val_ratio",
+        type=float,
+        default=0.2,
+        help="ratio for validaton (default: 0.2)",
+    )
+    parser.add_argument(
+        "--criterion",
+        type=str,
+        default="cross_entropy",
+        help="criterion type (default: cross_entropy)",
+    )
+    parser.add_argument(
+        "--lr_decay_step",
+        type=int,
+        default=20,
+        help="learning rate scheduler deacy step (default: 20)",
+    )
+    parser.add_argument(
+        "--log_interval",
+        type=int,
+        default=20,
+        help="how many batches to wait before logging training status",
+    )
+    parser.add_argument(
+        "--name", default="exp", help="model save at {SM_MODEL_DIR}/{name}"
+    )
+
+    # Container environment
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=os.environ.get("SM_CHANNEL_TRAIN", "/opt/ml/input/data/train/images"),
+    )
+    parser.add_argument(
+        "--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR", "./model")
+    )
+
+    parser.add_argument(
+        "--k_fold", type=int, default=-1
+    )
+    parser.add_argument(
+        "--category_train", type=bool, default=False
+    )
+
+    args = parser.parse_args()
+    data_dir = args.data_dir
+    model_dir = args.model_dir
+
+    if not os.path.exists('logs'): os.mkdir('logs')
+    train_logger = set_logger(f'logs/{args.name}.log')
+    train_logger.info(f"{args.name} Start")
+    try:
+        train(data_dir, model_dir, args, train_logger)
+        wandb.finish()
+        train_logger.info(f"{args.name} Finished")
+    except:
+        train_logger.error(traceback.format_exc())
+        wandb.finish()
