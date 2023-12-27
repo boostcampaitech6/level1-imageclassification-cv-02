@@ -31,13 +31,13 @@
 - 2023.12.11 ~ 2023.12.22
 
 프로젝트 세부 일정  
-<img align="center" src="imgs/schedule.png" width="800" height="400">
+<img align="center" src="imgs/schedule.png" width="732" height="450">
 
 <br />
 
 ## 🏆 프로젝트 결과
 - Private 리더보드에서 최종적으로 아래와 같은 결과를 얻었습니다.  
-<img align="center" src="imgs/result.png" width="600" height="80">
+<img align="center" src="imgs/result.png" width="840" height="50">
 
 <br />
 
@@ -97,7 +97,7 @@
 - 학습에 사용한 Model 클래스를 구현한 파일 
 - resnet34, resnet50, Resnet34CategoryModel, efficientnet_b0, efficientnet_b1, efficientnet_b2, efficientnet_b5, vit_base_patch16_224, vit_B_16_imagenet1k, vit-age-classifier
 #### 4) `train.py`
-- 입력 config 값을 training 함수에 전달하는 파일
+- config 값을 통해 학습 파라미터들을 불러오고 training 함수에 전달하는 파일
 - wandb를 통한 학습 진행상황 로깅 구현
 #### 5) `function.py`
 - 입력으로 들어온 파라미터를 통해 train 데이터셋으로 모델 학습을 진행하는 파일
@@ -111,6 +111,7 @@
 #### 8) `redis_model_scheduler`
 - `redis_publisher.py` : redis queue에 원하는 학습 config 값을 전달하는 파일
 - `schedlue_search.py` : redis queue에서 학습을 기다리고 있는 config 값을 조회 및 삭제하는 기능 구현
+- `task_consumer.py` : redis queue에 값이 들어오면 순차적으로 config를 입력받아 train에 전달
 
 <br />
 
@@ -142,15 +143,15 @@
 ## ▶️ 실행 방법
 
 #### Train
-`python train.py --name [실험명]`
+`python train.py`
 
 #### Inferecne
 `python inference.py --model_dir [모델저장경로]`
 
 #### scheduler를 통한 실행
-`python redis_publisher.py --ip [ip주소] --port [port번호] --user [이름]`  
+`python ./redis_model_scheduler/redis_publisher.py --ip [ip주소] --port [port번호] --user [이름]`  
 
-`python ~~.py --ip [ip주소] --port [port번호] --mode [mode이름]`
+`python ./redis_model_scheduler/task_consumer.py --ip [ip주소] --port [port번호] --mode [mode이름]`
 
 
 <br />
